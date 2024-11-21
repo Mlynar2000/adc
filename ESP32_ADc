@@ -1,0 +1,96 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WebServer.h>
+
+const char* ssid = "Telekom-219464";         // WiFi SSID
+const char* password = "fp5bpkpagua768km";   // WiFi heslo
+
+int adcValue = 0;      // Premenná na uloženie hodnoty z ADC
+unsigned long lastSendTime = 0;  // Čas posledného odoslania
+const unsigned long sendInterval = 5000; // Interval odosielania v ms
+
+WebServer server(80); // Web server na porte 80
+
+void initializeServer() {
+    server.on("/", serveHomepage);
+    server.begin();
+    Serial.println("Web server spustený.");
+}
+
+void setup() {
+    Serial.begin(115200);
+    WiFi.begin(ssid, password);
+
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\nWiFi pripojené, IP: " + WiFi.localIP().toString());
+
+    initializeServer();
+
+    pinMode(34, INPUT); // ADC pin (GPIO34)
+}
+
+void loop() {
+    server.handleClient(); // Kontrola požiadaviek klientov
+
+    // Čítanie z ADC
+    adcValue = analogRead(34);
+    Serial.println("ADC hodnota: " + String(adcValue));
+
+    // Odosielanie hodnoty na server každých 5 sekúnd
+    if (millis() - lastSendTime > sendInterval) {
+        lastSendTime = millis();
+        sendADCValueToServer(adcValue);
+    }
+
+    delay(100); // Malé oneskorenie na stabilizáciu
+}
+
+// Funkcia na generovanie hlavnej HTML stránky
+String generateHTML() {
+    String page = R"rawliteral(
+    <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+            <meta http-equiv="Pragma" content="no-cache" />
+            <meta http-equiv="Expires" content="0" />
+            <title>ADC Hodnota</title>
+        </head>
+        <body>
+            <center>
+                <h1>ADC Hodnota</h1>
+                <p>Aktuálna hodnota z ADC: $adc.</p>
+            </center>
+        </body>
+    </html>
+    )rawliteral";
+    page.replace("$adc", String(adcValue));
+    return page;
+}
+
+void serveHomepage() {
+    Serial.println("Hlavná stránka načítaná.");
+    server.send(200, "text/html", generateHTML());
+}
+
+// Funkcia na odoslanie ADC hodnoty na server
+void sendADCValueToServer(int value) {
+    if (WiFi.status() == WL_CONNECTED) {
+        HTTPClient http;
+        String url = "http://mlynarpatrik.atwebpages.com/priprava/adc.php?adc=" + String(value);
+        http.begin(url);
+
+        int responseCode = http.GET();
+        if (responseCode > 0) {
+            Serial.println("Odpoveď HTTP: " + String(responseCode));
+        } else {
+            Serial.println("Chyba HTTP: " + String(responseCode));
+        }
+        http.end();
+    } else {
+        Serial.println("WiFi nie je pripojené, hodnota ADC nebola odoslaná.");
+    }
+}
